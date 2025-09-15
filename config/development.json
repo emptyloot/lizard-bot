@@ -1,0 +1,6 @@
+{
+  "keywords": ["lizard"],
+  "responses": ["lizard"],
+  "cooldownSeconds": 3,
+  "maxMessageLength": 2000
+}
