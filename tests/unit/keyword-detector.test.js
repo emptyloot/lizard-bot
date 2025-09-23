@@ -1,8 +1,8 @@
 /* David Caldwell
 Test file for Keyword-Detector. Basic functions. Partial matches. Multiple Matches. Error handling. Change keyword.
 */
-const KeywordDetector = required('../../src/modules/processing/keyword-detector.js');
-const detectWord = required('../../src/modules/processing/keyword-detector.js')
+const KeywordDetector = require('../../src/modules/processing/keyword-detector.js');
+const {detectWord} = require('../../src/modules/processing/keyword-detector.js')
 
 describe('Detect Keyword', () => {
     describe('Function detectWord', () => {
