@@ -1,32 +1,29 @@
 // db/database.js (single file)
-const sqlite3 = require('sqlite3').verbose();
-const { open } = require('sqlite');
-const fs = require('fs').promises;
+const BetterSQLite3 = require('better-sqlite3');
+const fs = require('fs');
 const path = require('path');
 
 class Database {
   constructor() {
     this.db = null;
+    this.filename = './data/database.sqlite'
   }
 
-  async connect() {
-    this.db = await open({
-      filename: './data/database.sqlite',
-      driver: sqlite3.Database
-    });
-    
-    await this.db.exec('PRAGMA foreign_keys = ON');
-    await this.initSchema();
+  connect() {
+    this.db = BetterSQLite3(this.filename);
+    this.initSchema();
     return this.db;
   }
 
-  async initSchema() {
-    const schema = await fs.readFile(path.join(__dirname, 'schema.sql'), 'utf8');
-    await this.db.exec(schema);
+ 
+
+  initSchema() {
+    const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+    this.db.exec(schema);
   }
 
-  async close() {
-    if (this.db) await this.db.close();
+  close() {
+    if (this.db) this.db.close();
   }
 }
 
