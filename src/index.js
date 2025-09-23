@@ -1,3 +1,4 @@
+const {detectWord} = require('./modules/processing/keyword-detector.js');
 const { Client, GatewayIntentBits } = require('discord.js');
 const fs = require('fs');
 require('dotenv').config();
@@ -26,8 +27,9 @@ client.on('messageCreate', async (message) => {
   // Ignore bot messages
   if (message.author.bot) return;
   
+ 
   // Check for lizard keyword
-  if (message.content.toLowerCase().includes('lizard')) {
+  if (detectWord(message,'lizard')) {
     await message.channel.send('lizard');
   }
 });
