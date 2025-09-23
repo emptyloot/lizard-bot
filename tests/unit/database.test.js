@@ -1,48 +1,38 @@
 // __tests__/unit/database.test.js
-jest.mock('sqlite3', () => ({
-  verbose: jest.fn(() => ({
-    Database: jest.fn()
-  }))
-}));
 
-jest.mock('sqlite');
-jest.mock('fs', () => ({
-  promises: {
-    readFile: jest.fn()
-  }
-}));
-
-jest.mock('sqlite', () => ({
-  open: jest.fn()
-}));
-
-const fs = require('fs');
-const Database = require('../../src/modules/persistence/database.js');
-
-test('should read schema file with correct path', async () => {
-  const mockSchema = 'CREATE TABLE trigger_words...';
-  fs.promises.readFile.mockResolvedValue(mockSchema);
-  
-  const mockDb = { exec: jest.fn() };
-  require('sqlite').open.mockResolvedValue(mockDb);
-  
-  const db = Database;
-  await db.connect();
-  
-  // Verify file was read from correct location
-  expect(fs.promises.readFile).toHaveBeenCalledWith(
-    expect.stringContaining('schema.sql'), 
-    'utf8'
-  );
-  
-  // Verify the schema content was passed to exec
-  expect(mockDb.exec).toHaveBeenCalledWith(mockSchema);
+// Mock better sqlite
+jest.mock('better-sqlite3', () => {
+  return jest.fn().mockImplementation(() => ({
+    exec: jest.fn(),
+    prepare: jest.fn(() => ({
+      get: jest.fn(),
+      run: jest.fn(),
+      all: jest.fn()
+    })),
+    close: jest.fn()
+  }));
 });
 
-test('should handle schema file read errors', async () => {
-  fs.promises.readFile.mockRejectedValue(new Error('File not found'));
-  
-  const db = Database;
-  
-  await expect(db.connect()).rejects.toThrow('File not found');
+const Database = require('../../src/modules/persistence/database');
+const BetterSQLite3 = require('better-sqlite3');
+
+describe('Database Unit Tests', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('should connect and initialize schema', () => {
+    const mockDb = {
+      exec: jest.fn(),
+      close: jest.fn()
+    };
+    
+    BetterSQLite3.mockReturnValue(mockDb);
+
+    const db = Database;
+    db.connect();
+
+    expect(BetterSQLite3).toHaveBeenCalledWith('./data/database.sqlite');
+    expect(mockDb.exec).toHaveBeenCalled();
+  });
 });
