@@ -1,3 +1,4 @@
+//David Caldwell Class for sql database creation and connection. 
 // db/database.js (single file)
 const BetterSQLite3 = require('better-sqlite3');
 const fs = require('fs');
@@ -15,8 +16,8 @@ class Database {
     return this.db;
   }
 
- 
 
+ 
   initSchema() {
     const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
     this.db.exec(schema);
