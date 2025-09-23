@@ -18,10 +18,11 @@ CREATE TABLE channel_cooldowns (
 -- Auto-cleanup trigger: Remove cooldown entries older than 3 seconds
 -- This trigger runs BEFORE any SELECT query on channel_cooldowns
 CREATE TRIGGER cleanup_expired_cooldowns 
-    BEFORE SELECT ON channel_cooldowns
+    AFTER INSERT ON channel_cooldowns
 BEGIN
     DELETE FROM channel_cooldowns 
-    WHERE datetime(last_response_at, '+3 seconds') < datetime('now');
+    WHERE datetime(last_response_at, '+3 seconds') < datetime('now')
+    AND channel_id != NEW.channel_id; -- Don't delete the one we just added
 END;
 
 -- Index for performance
