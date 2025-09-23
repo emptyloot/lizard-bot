@@ -7,6 +7,10 @@ yarn-error.log*
 
 # Environment variables
 .env
+/tests/setup/jest.setup.js
+*-parameters.json
+.aws/
+*.pem
 
 # Database
 data/*.db
