@@ -30,8 +30,7 @@ Resources:
             Principal:
               Service: codepipeline.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AWSCodePipelineServiceRole
+
       Policies:
         - PolicyName: CodePipelineExecutionPolicy
           PolicyDocument:
