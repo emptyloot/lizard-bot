@@ -1,0 +1,382 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Staging Environment - Elastic Beanstalk for Lizard Bot Discord Application'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: 'lizardbot'
+    Description: 'Name of the project for resource naming'
+    
+  Environment:
+    Type: String
+    Default: 'staging'
+    Description: 'Environment name (staging/production)'
+    
+  DiscordBotToken:
+    Type: String
+    Description: 'Discord bot token for staging environment'
+    NoEcho: true
+    MinLength: 50
+    ConstraintDescription: 'Must be a valid Discord bot token'
+
+Resources:
+  # ==============================================================================
+  # Secrets Manager - Discord Bot Token
+  # ==============================================================================
+  DiscordBotSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${ProjectName}/${Environment}/discord-bot-token'
+      Description: !Sub 'Discord bot token for ${ProjectName} ${Environment} environment'
+      SecretString: !Ref DiscordBotToken
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ==============================================================================
+  # S3 Bucket for Application Versions
+  # ==============================================================================
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-${Environment}-artifacts-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ==============================================================================
+  # VPC and Networking
+  # ==============================================================================
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-vpc'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-igw'
+        - Key: Project
+          Value: !Ref ProjectName
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.1.0/24'
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-public-subnet'
+        - Key: Project
+          Value: !Ref ProjectName
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-public-rt'
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # ==============================================================================
+  # Security Groups
+  # ==============================================================================
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ProjectName}-${Environment}-ec2-sg'
+      GroupDescription: 'Security group for EC2 instance'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: '0.0.0.0/0'
+          Description: 'HTTP access'
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: '0.0.0.0/0'
+          Description: 'Application health check'
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: '0.0.0.0/0'
+          Description: 'All outbound traffic'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-ec2-sg'
+        - Key: Project
+          Value: !Ref ProjectName
+
+  EFSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ProjectName}-${Environment}-efs-sg'
+      GroupDescription: 'Security group for EFS access'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref EC2SecurityGroup
+          Description: 'NFS access from EC2 instances'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-efs-sg'
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # ==============================================================================
+  # EFS File System for Persistent Data
+  # ==============================================================================
+  EFSFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      CreationToken: !Sub '${ProjectName}-${Environment}-efs'
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+      Encrypted: true
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-${Environment}-efs'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  EFSMountTarget:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref EFSFileSystem
+      SubnetId: !Ref PublicSubnet
+      SecurityGroups:
+        - !Ref EFSSecurityGroup
+
+  # ==============================================================================
+  # IAM Roles and Policies
+  # ==============================================================================
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-ec2-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkMulticontainerDocker
+        - arn:aws:iam::aws:policy/AWSElasticBeanstalkWorkerTier
+      Policies:
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref DiscordBotSecret
+        - PolicyName: EFSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                  - elasticfilesystem:DescribeFileSystems
+                Resource: !Sub 'arn:aws:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/${EFSFileSystem}'
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${ProjectName}-${Environment}-instance-profile'
+      Roles:
+        - !Ref EC2InstanceRole
+
+  # ==============================================================================
+  # Elastic Beanstalk Application and Version
+  # ==============================================================================
+  BeanstalkApplication:
+    Type: AWS::ElasticBeanstalk::Application
+    Properties:
+      ApplicationName: !Sub '${ProjectName}-${Environment}'
+      Description: !Sub 'Discord Bot Application - ${Environment}'
+
+  BeanstalkApplicationVersion:
+    Type: AWS::ElasticBeanstalk::ApplicationVersion
+    Properties:
+      ApplicationName: !Ref BeanstalkApplication
+      VersionLabel: !Sub 'v-${Environment}-1.0.0'
+      Description: !Sub 'Version 1.0.0 for ${Environment}'
+      SourceBundle:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: !Sub '${Environment}-deployment-package.zip'
+
+  # ==============================================================================
+  # Elastic Beanstalk Environment
+  # ==============================================================================
+  BeanstalkEnvironment:
+    Type: AWS::ElasticBeanstalk::Environment
+    Properties:
+      ApplicationName: !Ref BeanstalkApplication
+      EnvironmentName: !Sub '${ProjectName}-${Environment}-env'
+      Description: !Sub '${ProjectName} Discord Bot - ${Environment} Environment'
+      SolutionStackName: '64bit Amazon Linux 2 v5.8.4 running Node.js 18'
+      VersionLabel: !Ref BeanstalkApplicationVersion
+      OptionSettings:
+        # Platform Configuration
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: EnvironmentType
+          Value: SingleInstance
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: InstanceType
+          Value: t3.nano
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: IamInstanceProfile
+          Value: !Ref EC2InstanceProfile
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: SecurityGroups
+          Value: !Ref EC2SecurityGroup
+        
+        # Network Configuration
+        - Namespace: aws:ec2:vpc
+          OptionName: VPCId
+          Value: !Ref VPC
+        - Namespace: aws:ec2:vpc
+          OptionName: Subnets
+          Value: !Ref PublicSubnet
+        
+        # Application Environment Variables
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: NODE_ENV
+          Value: !Ref Environment
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: PORT
+          Value: '8080'
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: LOG_LEVEL
+          Value: 'debug'
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: DISCORD_BOT_TOKEN_SECRET
+          Value: !Ref DiscordBotSecret
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: AWS_REGION
+          Value: !Ref AWS::Region
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: EFS_MOUNT_POINT
+          Value: '/var/app/current/data'
+        - Namespace: aws:elasticbeanstalk:application:environment
+          OptionName: EFS_FILE_SYSTEM_ID
+          Value: !Ref EFSFileSystem
+
+        # Health Check Configuration
+        - Namespace: aws:elasticbeanstalk:healthreporting:system
+          OptionName: SystemType
+          Value: enhanced
+        - Namespace: aws:elasticbeanstalk:environment:process:default
+          OptionName: HealthCheckPath
+          Value: '/health'
+        - Namespace: aws:elasticbeanstalk:environment:process:default
+          OptionName: Port
+          Value: '8080'
+
+        # Logging Configuration
+        - Namespace: aws:elasticbeanstalk:cloudwatch:logs
+          OptionName: StreamLogs
+          Value: true
+        - Namespace: aws:elasticbeanstalk:cloudwatch:logs
+          OptionName: DeleteOnTerminate
+          Value: false
+        - Namespace: aws:elasticbeanstalk:cloudwatch:logs
+          OptionName: RetentionInDays
+          Value: 7
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  BeanstalkApplicationName:
+    Description: 'Name of the Elastic Beanstalk application'
+    Value: !Ref BeanstalkApplication
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-ApplicationName'
+
+  BeanstalkEnvironmentName:
+    Description: 'Name of the Elastic Beanstalk environment'
+    Value: !Ref BeanstalkEnvironment
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-EnvironmentName'
+
+  ApplicationURL:
+    Description: 'URL of the deployed application'
+    Value: !GetAtt BeanstalkEnvironment.EndpointURL
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-URL'
+
+  ArtifactsBucketName:
+    Description: 'Name of the S3 artifacts bucket'
+    Value: !Ref ArtifactsBucket
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-ArtifactsBucket'
+
+  EFSFileSystemId:
+    Description: 'EFS File System ID for persistent storage'
+    Value: !Ref EFSFileSystem
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-EFSFileSystemId'

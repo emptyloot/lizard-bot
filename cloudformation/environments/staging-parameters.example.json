@@ -1,0 +1,14 @@
+[
+  {
+    "ParameterKey": "ProjectName",
+    "ParameterValue": "lizardbot"
+  },
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "staging"
+  },
+  {
+    "ParameterKey": "DiscordBotToken",
+    "ParameterValue": "your-actual-staging-discord-bot-token"
+  }
+]

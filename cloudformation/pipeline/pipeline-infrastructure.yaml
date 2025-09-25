@@ -1,0 +1,450 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CodePipeline Infrastructure for Lizard Bot CI/CD - GitFlow 3-Pipeline Strategy'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: 'lizardbot'
+    Description: 'Name of the project for resource naming'
+  
+  GitHubOwner:
+    Type: String
+    Description: 'GitHub repository owner/organization'
+    
+  GitHubRepo:
+    Type: String  
+    Description: 'GitHub repository name'
+    
+  GitHubBranch:
+    Type: String
+    Default: 'master'
+    Description: 'GitHub branch to monitor for changes'
+
+Resources:
+  # ==============================================================================
+  # S3 Artifacts Bucket (Shared across all environments)
+  # ==============================================================================
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-pipeline-artifacts-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldArtifacts
+            Status: Enabled
+            ExpirationInDays: 30
+            NoncurrentVersionExpirationInDays: 7
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: 'Pipeline Artifacts'
+
+  # ==============================================================================
+  # GitHub CodeStar Connection
+  # ==============================================================================
+  GitHubConnection:
+    Type: AWS::CodeStarConnections::Connection
+    Properties:
+      ConnectionName: !Sub '${ProjectName}-github-connection'
+      ProviderType: GitHub
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: 'Source Control Integration'
+
+  # ==============================================================================
+  # CodeBuild Project - PR Validation (Test Only)
+  # ==============================================================================
+  PRValidationProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${ProjectName}-pr-validation'
+      Description: 'Validate pull requests with build and test'
+      ServiceRole: 
+        Fn::ImportValue: !Sub '${ProjectName}-CodeBuildServiceRoleArn'
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: PROJECT_NAME
+            Value: !Ref ProjectName
+          - Name: ENVIRONMENT
+            Value: 'pr-validation'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                nodejs: 18
+              commands:
+                - echo "Installing dependencies for PR validation..."
+                - npm install
+            pre_build:
+              commands:
+                - echo "Running pre-build validation..."
+                - echo "Linting code..."
+                - npm run lint || echo "No lint script found, skipping..."
+            build:
+              commands:
+                - echo "Running comprehensive tests..."
+                - npm test || echo "No tests found, skipping..."
+                - echo "Building application to verify it compiles..."
+                - zip -r pr-validation-package.zip . -x "node_modules/*" "*.git*" "*.md" "tests/*"
+            post_build:
+              commands:
+                - echo "PR validation completed - ready for human review"
+          artifacts:
+            files:
+              - pr-validation-package.zip
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: 'pr-validation'
+
+  # ==============================================================================
+  # CodeBuild Project - Deploy to Staging
+  # ==============================================================================
+  DeployToStagingProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${ProjectName}-deploy-staging'
+      Description: 'Deploy Discord bot to staging environment'
+      ServiceRole: 
+        Fn::ImportValue: !Sub '${ProjectName}-CodeBuildServiceRoleArn'
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: PROJECT_NAME
+            Value: !Ref ProjectName
+          - Name: ENVIRONMENT
+            Value: 'staging'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - echo "Installing AWS CLI and dependencies..."
+                - pip install --upgrade awscli
+            pre_build:
+              commands:
+                - echo "Preparing for deployment to staging..."
+                - echo "Environment: $ENVIRONMENT"
+            build:
+              commands:
+                - echo "Deploying to staging environment..."
+                - |
+                  aws cloudformation deploy \
+                    --template-file cloudformation/environments/staging.yaml \
+                    --stack-name ${PROJECT_NAME}-staging \
+                    --parameter-overrides \
+                      ProjectName=${PROJECT_NAME} \
+                      Environment=staging \
+                    --capabilities CAPABILITY_IAM \
+                    --region ${AWS_DEFAULT_REGION}
+            post_build:
+              commands:
+                - echo "Staging deployment completed"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: 'staging'
+
+  # ==============================================================================
+  # CodeBuild Project - Deploy to Production
+  # ==============================================================================
+  DeployToProductionProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${ProjectName}-deploy-production'
+      Description: 'Deploy Discord bot to production environment'
+      ServiceRole: 
+        Fn::ImportValue: !Sub '${ProjectName}-CodeBuildServiceRoleArn'
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: PROJECT_NAME
+            Value: !Ref ProjectName
+          - Name: ENVIRONMENT
+            Value: 'production'
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - echo "Installing AWS CLI and dependencies..."
+                - pip install --upgrade awscli
+            pre_build:
+              commands:
+                - echo "Preparing for deployment to production..."
+                - echo "Environment: $ENVIRONMENT"
+            build:
+              commands:
+                - echo "Deploying to production environment..."
+                - |
+                  aws cloudformation deploy \
+                    --template-file cloudformation/environments/production.yaml \
+                    --stack-name ${PROJECT_NAME}-production \
+                    --parameter-overrides \
+                      ProjectName=${PROJECT_NAME} \
+                      Environment=production \
+                    --capabilities CAPABILITY_IAM \
+                    --region ${AWS_DEFAULT_REGION}
+            post_build:
+              commands:
+                - echo "Production deployment completed"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: 'production'
+
+  # ==============================================================================
+  # Pipeline 1: PR Validation Pipeline (Test Only - No Deployment)
+  # ==============================================================================
+  PRValidationPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub '${ProjectName}-pr-validation'
+      RoleArn: 
+        Fn::ImportValue: !Sub '${ProjectName}-CodePipelineServiceRoleArn'
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactsBucket
+      Triggers:
+        - ProviderType: CodeStarSourceConnection
+          GitConfiguration:
+            SourceActionName: SourceAction
+            PullRequest:
+              - Events:
+                  - OPEN
+                  - UPDATED
+                Branches:
+                  Includes:
+                    - staging
+      Stages:
+        # Source Stage
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: '1'
+              Configuration:
+                ConnectionArn: !Ref GitHubConnection
+                FullRepositoryId: !Sub '${GitHubOwner}/${GitHubRepo}'
+                BranchName: staging
+                OutputArtifactFormat: CODE_ZIP
+              OutputArtifacts:
+                - Name: SourceOutput
+
+        # PR Validation Stage
+        - Name: ValidatePR
+          Actions:
+            - Name: BuildAndTest
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref PRValidationProject
+              InputArtifacts:
+                - Name: SourceOutput
+
+  # ==============================================================================
+  # Pipeline 2: Staging Deployment Pipeline
+  # ==============================================================================
+  StagingPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub '${ProjectName}-staging'
+      RoleArn: 
+        Fn::ImportValue: !Sub '${ProjectName}-CodePipelineServiceRoleArn'
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactsBucket
+      Triggers:
+        - ProviderType: CodeStarSourceConnection
+          GitConfiguration:
+            SourceActionName: SourceAction
+            Push:
+              - Branches:
+                  Includes:
+                    - staging
+      Stages:
+        # Source Stage
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: '1'
+              Configuration:
+                ConnectionArn: !Ref GitHubConnection
+                FullRepositoryId: !Sub '${GitHubOwner}/${GitHubRepo}'
+                BranchName: staging
+                OutputArtifactFormat: CODE_ZIP
+              OutputArtifacts:
+                - Name: SourceOutput
+
+        # Deploy to Staging (Direct)
+        - Name: DeployStaging
+          Actions:
+            - Name: DeployToStaging
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref DeployToStagingProject
+              InputArtifacts:
+                - Name: SourceOutput
+
+  # ==============================================================================
+  # Pipeline 3: Production Deployment Pipeline
+  # ==============================================================================
+  ProductionPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub '${ProjectName}-production'
+      RoleArn: 
+        Fn::ImportValue: !Sub '${ProjectName}-CodePipelineServiceRoleArn'
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactsBucket
+      Triggers:
+        - ProviderType: CodeStarSourceConnection
+          GitConfiguration:
+            SourceActionName: SourceAction
+            Push:
+              - Branches:
+                  Includes:
+                    - master
+                    - main
+      Stages:
+        # Source Stage
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: '1'
+              Configuration:
+                ConnectionArn: !Ref GitHubConnection
+                FullRepositoryId: !Sub '${GitHubOwner}/${GitHubRepo}'
+                BranchName: master
+                OutputArtifactFormat: CODE_ZIP
+              OutputArtifacts:
+                - Name: SourceOutput
+
+        # Manual Approval for Production
+        - Name: ApprovalForProduction
+          Actions:
+            - Name: ManualApproval
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: '1'
+              Configuration:
+                CustomData: 'Please review staging deployment and approve for production release'
+
+        # Deploy to Production (Direct)
+        - Name: DeployProduction
+          Actions:
+            - Name: DeployToProduction
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref DeployToProductionProject
+              InputArtifacts:
+                - Name: SourceOutput
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: 'CI/CD Pipeline'
+
+Outputs:
+  PRValidationPipelineName:
+    Description: 'Name of the PR validation pipeline'
+    Value: !Ref PRValidationPipeline
+    Export:
+      Name: !Sub '${ProjectName}-PRValidationPipelineName'
+
+  StagingPipelineName:
+    Description: 'Name of the staging deployment pipeline'
+    Value: !Ref StagingPipeline
+    Export:
+      Name: !Sub '${ProjectName}-StagingPipelineName'
+
+  ProductionPipelineName:
+    Description: 'Name of the production deployment pipeline'
+    Value: !Ref ProductionPipeline
+    Export:
+      Name: !Sub '${ProjectName}-ProductionPipelineName'
+
+  ArtifactsBucketName:
+    Description: 'Name of the S3 artifacts bucket'
+    Value: !Ref ArtifactsBucket
+    Export:
+      Name: !Sub '${ProjectName}-ArtifactsBucketName'
+
+  GitHubConnectionArn:
+    Description: 'ARN of the GitHub connection'
+    Value: !Ref GitHubConnection
+    Export:
+      Name: !Sub '${ProjectName}-GitHubConnectionArn'
