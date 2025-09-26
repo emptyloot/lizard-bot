@@ -401,6 +401,7 @@ Resources:
       Name: !Sub '${ProjectName}-pr-validation'
       RoleArn: 
         Fn::ImportValue: !Sub '${ProjectName}-CodePipelineServiceRoleArn'
+      ExecutionMode: QUEUED
       ArtifactStore:
         Type: S3
         Location: !Ref ArtifactsBucket
