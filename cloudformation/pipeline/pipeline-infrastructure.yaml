@@ -20,7 +20,30 @@ Parameters:
     Default: 'master'
     Description: 'GitHub branch to monitor for changes'
 
+  GitHubToken:
+    Type: String
+    NoEcho: true
+    Description: 'GitHub personal access token for status updates'
+
 Resources:
+  # ==============================================================================
+  # GitHub Token Secret for Status Updates
+  # ==============================================================================
+  GitHubTokenSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${ProjectName}-github-token'
+      Description: 'GitHub personal access token for status updates'
+      SecretString: !Sub |
+        {
+          "token": "${GitHubToken}"
+        }
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: 'GitHub Integration'
+
   # ==============================================================================
   # S3 Artifacts Bucket (Shared across all environments)
   # ==============================================================================
@@ -88,6 +111,14 @@ Resources:
             Value: !Ref ProjectName
           - Name: ENVIRONMENT
             Value: 'pr-validation'
+          # GitHub Integration Variables
+          - Name: GITHUB_OWNER
+            Value: !Ref GitHubOwner
+          - Name: GITHUB_REPO
+            Value: !Ref GitHubRepo
+          - Name: GITHUB_TOKEN
+            Type: SECRETS_MANAGER
+            Value: !Sub '${GitHubTokenSecret}:token'
       Source:
         Type: CODEPIPELINE
         BuildSpec: |
@@ -101,6 +132,20 @@ Resources:
                 - npm install
             pre_build:
               commands:
+                - echo "Setting GitHub status to pending..."
+                - |
+                  if [ ! -z "$GITHUB_TOKEN" ] && [ ! -z "$CODEBUILD_RESOLVED_SOURCE_VERSION" ]; then
+                    curl -X POST \
+                      -H "Authorization: token $GITHUB_TOKEN" \
+                      -H "Accept: application/vnd.github.v3+json" \
+                      "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/statuses/$CODEBUILD_RESOLVED_SOURCE_VERSION" \
+                      -d '{
+                        "state": "pending",
+                        "target_url": "'$CODEBUILD_BUILD_URL'",
+                        "description": "PR validation is running...",
+                        "context": "continuous-integration/pr-validation"
+                      }'
+                  fi
                 - echo "Running pre-build validation..."
                 - echo "Linting code..."
                 - npm run lint || echo "No lint script found, skipping..."
@@ -113,6 +158,27 @@ Resources:
             post_build:
               commands:
                 - echo "PR validation completed - ready for human review"
+                - |
+                  if [ ! -z "$GITHUB_TOKEN" ] && [ ! -z "$CODEBUILD_RESOLVED_SOURCE_VERSION" ]; then
+                    if [ $CODEBUILD_BUILD_SUCCEEDING -eq 1 ]; then
+                      STATUS="success"
+                      DESCRIPTION="All PR validation checks passed!"
+                    else
+                      STATUS="failure"
+                      DESCRIPTION="PR validation failed. Check CodeBuild logs."
+                    fi
+                    
+                    curl -X POST \
+                      -H "Authorization: token $GITHUB_TOKEN" \
+                      -H "Accept: application/vnd.github.v3+json" \
+                      "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/statuses/$CODEBUILD_RESOLVED_SOURCE_VERSION" \
+                      -d '{
+                        "state": "'$STATUS'",
+                        "target_url": "'$CODEBUILD_BUILD_URL'",
+                        "description": "'$DESCRIPTION'",
+                        "context": "continuous-integration/pr-validation"
+                      }'
+                  fi
           artifacts:
             files:
               - pr-validation-package.zip
@@ -147,6 +213,14 @@ Resources:
             Value: !Ref ProjectName
           - Name: ENVIRONMENT
             Value: 'staging'
+          # GitHub Integration Variables
+          - Name: GITHUB_OWNER
+            Value: !Ref GitHubOwner
+          - Name: GITHUB_REPO
+            Value: !Ref GitHubRepo
+          - Name: GITHUB_TOKEN
+            Type: SECRETS_MANAGER
+            Value: !Sub '${GitHubTokenSecret}:token'
       Source:
         Type: CODEPIPELINE
         BuildSpec: |
@@ -158,6 +232,20 @@ Resources:
                 - pip install --upgrade awscli
             pre_build:
               commands:
+                - echo "Setting GitHub status to pending..."
+                - |
+                  if [ ! -z "$GITHUB_TOKEN" ] && [ ! -z "$CODEBUILD_RESOLVED_SOURCE_VERSION" ]; then
+                    curl -X POST \
+                      -H "Authorization: token $GITHUB_TOKEN" \
+                      -H "Accept: application/vnd.github.v3+json" \
+                      "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/statuses/$CODEBUILD_RESOLVED_SOURCE_VERSION" \
+                      -d '{
+                        "state": "pending",
+                        "target_url": "'$CODEBUILD_BUILD_URL'",
+                        "description": "Deploying to staging...",
+                        "context": "continuous-integration/staging-deployment"
+                      }'
+                  fi
                 - echo "Preparing for deployment to staging..."
                 - echo "Environment: $ENVIRONMENT"
             build:
@@ -175,6 +263,27 @@ Resources:
             post_build:
               commands:
                 - echo "Staging deployment completed"
+                - |
+                  if [ ! -z "$GITHUB_TOKEN" ] && [ ! -z "$CODEBUILD_RESOLVED_SOURCE_VERSION" ]; then
+                    if [ $CODEBUILD_BUILD_SUCCEEDING -eq 1 ]; then
+                      STATUS="success"
+                      DESCRIPTION="Staging deployment successful!"
+                    else
+                      STATUS="failure"
+                      DESCRIPTION="Staging deployment failed. Check CodeBuild logs."
+                    fi
+                    
+                    curl -X POST \
+                      -H "Authorization: token $GITHUB_TOKEN" \
+                      -H "Accept: application/vnd.github.v3+json" \
+                      "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/statuses/$CODEBUILD_RESOLVED_SOURCE_VERSION" \
+                      -d '{
+                        "state": "'$STATUS'",
+                        "target_url": "'$CODEBUILD_BUILD_URL'",
+                        "description": "'$DESCRIPTION'",
+                        "context": "continuous-integration/staging-deployment"
+                      }'
+                  fi
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -206,6 +315,14 @@ Resources:
             Value: !Ref ProjectName
           - Name: ENVIRONMENT
             Value: 'production'
+          # GitHub Integration Variables
+          - Name: GITHUB_OWNER
+            Value: !Ref GitHubOwner
+          - Name: GITHUB_REPO
+            Value: !Ref GitHubRepo
+          - Name: GITHUB_TOKEN
+            Type: SECRETS_MANAGER
+            Value: !Sub '${GitHubTokenSecret}:token'
       Source:
         Type: CODEPIPELINE
         BuildSpec: |
@@ -217,6 +334,20 @@ Resources:
                 - pip install --upgrade awscli
             pre_build:
               commands:
+                - echo "Setting GitHub status to pending..."
+                - |
+                  if [ ! -z "$GITHUB_TOKEN" ] && [ ! -z "$CODEBUILD_RESOLVED_SOURCE_VERSION" ]; then
+                    curl -X POST \
+                      -H "Authorization: token $GITHUB_TOKEN" \
+                      -H "Accept: application/vnd.github.v3+json" \
+                      "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/statuses/$CODEBUILD_RESOLVED_SOURCE_VERSION" \
+                      -d '{
+                        "state": "pending",
+                        "target_url": "'$CODEBUILD_BUILD_URL'",
+                        "description": "Deploying to production...",
+                        "context": "continuous-integration/production-deployment"
+                      }'
+                  fi
                 - echo "Preparing for deployment to production..."
                 - echo "Environment: $ENVIRONMENT"
             build:
@@ -234,6 +365,27 @@ Resources:
             post_build:
               commands:
                 - echo "Production deployment completed"
+                - |
+                  if [ ! -z "$GITHUB_TOKEN" ] && [ ! -z "$CODEBUILD_RESOLVED_SOURCE_VERSION" ]; then
+                    if [ $CODEBUILD_BUILD_SUCCEEDING -eq 1 ]; then
+                      STATUS="success"
+                      DESCRIPTION="Production deployment successful!"
+                    else
+                      STATUS="failure" 
+                      DESCRIPTION="Production deployment failed. Check CodeBuild logs."
+                    fi
+                    
+                    curl -X POST \
+                      -H "Authorization: token $GITHUB_TOKEN" \
+                      -H "Accept: application/vnd.github.v3+json" \
+                      "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/statuses/$CODEBUILD_RESOLVED_SOURCE_VERSION" \
+                      -d '{
+                        "state": "'$STATUS'",
+                        "target_url": "'$CODEBUILD_BUILD_URL'",
+                        "description": "'$DESCRIPTION'",
+                        "context": "continuous-integration/production-deployment"
+                      }'
+                  fi
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -448,3 +600,9 @@ Outputs:
     Value: !Ref GitHubConnection
     Export:
       Name: !Sub '${ProjectName}-GitHubConnectionArn'
+
+  GitHubTokenSecretArn:
+    Description: 'ARN of the GitHub token secret'
+    Value: !Ref GitHubTokenSecret
+    Export:
+      Name: !Sub '${ProjectName}-GitHubTokenSecretArn'

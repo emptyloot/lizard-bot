@@ -14,5 +14,9 @@
   {
     "ParameterKey": "GitHubBranch",
     "ParameterValue": "master"
+  },
+  {
+    "ParameterKey": "GitHubToken",
+    "ParameterValue": "your_github_token_here"
   }
 ]
