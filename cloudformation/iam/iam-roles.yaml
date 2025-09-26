@@ -71,7 +71,13 @@ Resources:
                 Resource: !GetAtt CloudFormationServiceRole.Arn
               # CodeStar Connection
               - Effect: Allow
-                Action: codestar-connections:UseConnection
+                Action: 
+                  - codestar-connections:UseConnection
+                  - codestar-connections:GetConnection
+                  - codestar-connections:GetInstallationUrl
+                  - codestar-connections:GetIndividualAccessToken
+                  - codestar-connections:ListInstallationTargets
+                  - codestar-connections:StartOAuthHandshake
                 Resource: "arn:aws:codestar-connections:*:*:connection/*"
 
   # ==============================================================================
