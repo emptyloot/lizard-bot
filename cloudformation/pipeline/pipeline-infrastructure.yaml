@@ -166,10 +166,9 @@ Resources:
                     else
                       STATUS="failure"
                       DESCRIPTION="PR validation failed. Check CodeBuild logs."
-                    fi
-                    JSON_PAYLOAD=$(printf \ 
-                      '{"state":"%s", "target_url":"%s", "description":"%s", "context":"continuous-integration/pr-validation"}' \
-                      "$STATUS" "$CODEBUILD_BUILD_URL" "$DESCRIPTION")
+                    fi;
+
+                    JSON_PAYLOAD=$(printf '{"state":"%s", "target_url":"%s", "description":"%s", "context":"continuous-integration/pr-validation"}' "$STATUS" "$CODEBUILD_BUILD_URL" "$DESCRIPTION")
                     curl -X POST \
                       -H "Authorization: token $GITHUB_TOKEN" \
                       -H "Accept: application/vnd.github.v3+json" \
@@ -268,10 +267,9 @@ Resources:
                     else
                       STATUS="failure"
                       DESCRIPTION="Staging deployment failed. Check CodeBuild logs."
-                    fi
-                    JSON_PAYLOAD=$(printf \ 
-                      '{"state":"%s", "target_url":"%s", "description":"%s", "context":"continuous-integration/staging-deployment"}' \
-                      "$STATUS" "$CODEBUILD_BUILD_URL" "$DESCRIPTION")
+                    fi;
+
+                    JSON_PAYLOAD=$(printf '{"state":"%s", "target_url":"%s", "description":"%s", "context":"continuous-integration/staging-deployment"}' "$STATUS" "$CODEBUILD_BUILD_URL" "$DESCRIPTION")
                     curl -X POST \
                       -H "Authorization: token $GITHUB_TOKEN" \
                       -H "Accept: application/vnd.github.v3+json" \
@@ -367,10 +365,9 @@ Resources:
                     else
                       STATUS="failure" 
                       DESCRIPTION="Production deployment failed. Check CodeBuild logs."
-                    fi
-                    JSON_PAYLOAD=$(printf \ 
-                      '{"state":"%s", "target_url":"%s", "description":"%s", "context":"continuous-integration/production-deployment"}' \
-                      "$STATUS" "$CODEBUILD_BUILD_URL" "$DESCRIPTION")
+                    fi;
+
+                    JSON_PAYLOAD=$(printf '{"state":"%s", "target_url":"%s", "description":"%s", "context":"continuous-integration/production-deployment"}' "$STATUS" "$CODEBUILD_BUILD_URL" "$DESCRIPTION")
                     curl -X POST \
                       -H "Authorization: token $GITHUB_TOKEN" \
                       -H "Accept: application/vnd.github.v3+json" \
