@@ -25,7 +25,8 @@ class KeywordDetector {
 
 function detectWord(text,keyword) {
     //Stand alone function
-    return text.content.toLowerCase().includes(keyword)
+    const regex = new RegExp(`\\b${keyword.toLowerCase()}\\b`, 'i');
+    return regex.test(text.content.toLowerCase());
 };
 
 module.exports = { 

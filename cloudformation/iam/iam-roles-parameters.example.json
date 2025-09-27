@@ -1,0 +1,14 @@
+[
+  {
+    "ParameterKey": "ProjectName",
+    "ParameterValue": "your-project-name"
+  },
+  {
+    "ParameterKey": "GitHubOwner", 
+    "ParameterValue": "your-github-username"
+  },
+  {
+    "ParameterKey": "GitHubRepo",
+    "ParameterValue": "your-repo-name"
+  }
+]

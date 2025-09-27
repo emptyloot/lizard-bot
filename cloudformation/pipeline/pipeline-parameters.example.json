@@ -1,0 +1,22 @@
+[
+  {
+    "ParameterKey": "ProjectName",
+    "ParameterValue": "your-project-name"
+  },
+  {
+    "ParameterKey": "GitHubOwner", 
+    "ParameterValue": "your-github-username"
+  },
+  {
+    "ParameterKey": "GitHubRepo",
+    "ParameterValue": "your-repo-name"
+  },
+  {
+    "ParameterKey": "GitHubBranch",
+    "ParameterValue": "master"
+  },
+  {
+    "ParameterKey": "GitHubToken",
+    "ParameterValue": "your_github_token_here"
+  }
+]
